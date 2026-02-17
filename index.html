@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mini Battlegrounds: Unified Controls</title>
+    <title>Mini Battlegrounds: Final Build</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { margin: 0; overflow: hidden; background-color: #1a202c; color: white; user-select: none; }
@@ -57,8 +57,8 @@
             <h1 class="text-5xl font-bold text-yellow-500 mb-4 drop-shadow-lg">WASTELAND WARFARE</h1>
             <p class="text-gray-300 mb-6 max-w-md mx-auto">
                 1. <b>통합 조작</b>: 강하/달리기 모두 <b>SHIFT</b> 키를 사용하세요.<br>
-                2. <b>자기장 주의</b>: 파란 원 밖에서는 피해를 입습니다.<br>
-                3. <b>생존</b>: 최후의 1인이 되세요.
+                2. <b>미스터리 박스</b>: 상자를 열기 전엔 내용물을 알 수 없습니다.<br>
+                3. <b>생존</b>: 자기장과 적들로부터 살아남으세요.
             </p>
             <button id="start-btn" class="px-8 py-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold rounded text-xl shadow-lg transform transition hover:scale-105">
                 전투 시작
@@ -78,7 +78,6 @@
                 <div id="st-bar" class="bar-fill bg-yellow-400" style="width: 100%;"></div>
             </div>
         </div>
-        <!-- [UI 수정] 텍스트 변경 -->
         <div id="dive-controls" class="hidden flex-col items-center pointer-events-auto">
             <div class="text-sm mb-1 animate-pulse text-yellow-300">SHIFT 홀드: 급강하</div>
             <button id="dive-btn" class="w-24 h-24 rounded-full bg-blue-600/80 border-4 border-blue-400 flex items-center justify-center active:bg-blue-800 transition">
@@ -89,6 +88,9 @@
 </div>
 
 <script>
+/**
+ * Audio System
+ */
 const AudioSys = {
     ctx: null, windNode: null, windGain: null,
     init: function() {
@@ -136,6 +138,9 @@ const AudioSys = {
     stopWind: function() { if (this.windNode) { this.windNode.stop(); this.windNode = null; } }
 };
 
+/**
+ * Game Config & Constants
+ */
 const CANVAS = document.getElementById('gameCanvas');
 const CTX = CANVAS.getContext('2d');
 
@@ -145,7 +150,7 @@ const CONSTANTS = {
     PLAYER_SPEED_AIR: 300, PLAYER_SPEED_GROUND: 200, PLAYER_RADIUS: 15,
     CRATER_RADIUS: 60,
     LOOT_SPAWN_INTERVAL: 5,
-    BLUEZONE_DAMAGE: 5 // Damage per second outside zone
+    BLUEZONE_DAMAGE: 5 
 };
 
 const WEAPONS = {
@@ -155,17 +160,15 @@ const WEAPONS = {
     SHIELD: { name: '방탄방패', range: 40, damage: 10, delay: 600, defense: 0.5 }
 };
 
+// Global State
 let gameState = 'MENU';
 let gameTime = 0, lastTime = 0;
 let hasFirstLanded = false;
 let lootSpawnTimer = 0;
 
 let safeZone = {
-    startX: 0, startY: 0,
-    endX: 0, endY: 0,
-    currentX: 0, currentY: 0,
-    startR: 0, endR: 0,
-    currentR: 0
+    startX: 0, startY: 0, endX: 0, endY: 0,
+    currentX: 0, currentY: 0, startR: 0, endR: 0, currentR: 0
 };
 
 let camera = { x: 0, y: 0, zoom: 1 };
@@ -174,6 +177,9 @@ let player = null;
 const keys = { w: false, a: false, s: false, d: false, space: false, shift: false, mouse: false };
 const mousePos = { x: 0, y: 0 };
 
+/**
+ * Classes
+ */
 class MapObject {
     constructor() {
         this.x = Math.random() * CONSTANTS.MAP_SIZE;
@@ -232,8 +238,7 @@ class Entity {
     updateDrop(dt) {
         let rate = this.dropSpeed;
         if (this.isPlayer) {
-            // [수정] 강하 시에도 shift 키 사용
-            this.isDiving = keys.shift;
+            this.isDiving = keys.shift; // Unified Control
             AudioSys.updateWind(this.isDiving ? 1.0 : 0.0);
         } else {
             if (this.actionTimer <= 0) {
@@ -261,21 +266,20 @@ class Entity {
             this.z = 0; this.isDiving = false;
             if (!hasFirstLanded) {
                 hasFirstLanded = true;
-                addLog("첫 착지 발생! 자기장이 축소됩니다!");
+                addLog("첫 착지! 자기장이 축소되며 보급이 시작됩니다.");
             }
             if (this.isPlayer) { AudioSys.playNoise(0.5, 0.8); AudioSys.stopWind(); }
             createCrater(this.x, this.y, CONSTANTS.CRATER_RADIUS, this.id);
         }
         
+        // Air Body Check
         entities.forEach(other => {
             if (other === this || !other.alive || other.z <= 0) return;
             if (Math.abs(this.z - other.z) > 100) return;
             if (Math.hypot(this.x-other.x, this.y-other.y) < this.radius*2) {
                 const angle = Math.atan2(this.y-other.y, this.x-other.x);
-                const pushDist = 10;
-                let nx = this.x + Math.cos(angle)*pushDist;
-                let ny = this.y + Math.sin(angle)*pushDist;
-                this.x = nx; this.y = ny;
+                this.x = this.x + Math.cos(angle)*10; 
+                this.y = this.y + Math.sin(angle)*10;
                 
                 if (this.isDiving) { 
                     this.isDiving = false; createParticles(this.x, this.y, '#fff', 5);
@@ -288,17 +292,14 @@ class Entity {
     updateGround(dt) {
         if (this.attackCooldown > 0) this.attackCooldown -= dt;
         
+        // Blue Zone
         if (gameState === 'GROUND') {
             const distToCenter = Math.hypot(this.x - safeZone.currentX, this.y - safeZone.currentY);
             if (distToCenter > safeZone.currentR) {
                 this.takeDamage(CONSTANTS.BLUEZONE_DAMAGE * dt, null); 
-                if (this.isPlayer) {
-                    document.getElementById('damage-overlay').style.opacity = 0.5 + Math.sin(Date.now()/100)*0.2;
-                }
+                if (this.isPlayer) document.getElementById('damage-overlay').style.opacity = 0.5 + Math.sin(Date.now()/100)*0.2;
             } else {
-                if (this.isPlayer) {
-                    document.getElementById('damage-overlay').style.opacity = 0;
-                }
+                if (this.isPlayer) document.getElementById('damage-overlay').style.opacity = 0;
             }
         }
 
@@ -311,7 +312,7 @@ class Entity {
             if (this.fatigued) {
                 this.stamina += 33.3 * dt; if (this.stamina >= 100) { this.stamina = 100; this.fatigued = false; }
             } else {
-                // [확인] 달리기 키도 shift로 유지 (기존 코드와 통일)
+                // Unified Control: Shift for Sprint
                 if (keys.shift && isMoving && this.stamina > 0) {
                     spd *= 1.5; this.stamina -= 40 * dt; if (this.stamina <= 0) { this.stamina = 0; this.fatigued = true; }
                 } else if (this.stamina < 100) {
@@ -325,13 +326,9 @@ class Entity {
                 const nextX = this.x + (dx/len) * spd * dt;
                 const nextY = this.y + (dy/len) * spd * dt;
                 
-                if (!this.checkMapCollision(nextX, nextY)) {
-                    this.x = nextX; this.y = nextY;
-                } else if (!this.checkMapCollision(nextX, this.y)) {
-                    this.x = nextX; 
-                } else if (!this.checkMapCollision(this.x, nextY)) {
-                    this.y = nextY; 
-                }
+                if (!this.checkMapCollision(nextX, nextY)) { this.x = nextX; this.y = nextY; }
+                else if (!this.checkMapCollision(nextX, this.y)) { this.x = nextX; }
+                else if (!this.checkMapCollision(this.x, nextY)) { this.y = nextY; }
             }
 
             const wx = (mousePos.x - CANVAS.width/2) / camera.zoom + camera.x + CANVAS.width/2;
@@ -361,26 +358,22 @@ class Entity {
     updateAI(dt) {
         if (this.actionTimer > 0) this.actionTimer -= dt;
         
+        // Anti-Stuck Logic
         const movedDist = Math.hypot(this.x - this.lastX, this.y - this.lastY);
-        if (movedDist < 1.0) { 
-            this.stuckCounter += dt;
-        } else {
-            this.stuckCounter = 0;
-        }
+        if (movedDist < 1.0) this.stuckCounter += dt;
+        else this.stuckCounter = 0;
         this.lastX = this.x; this.lastY = this.y;
 
         if (this.stuckCounter > 0.5) {
             if (this.stuckCounter > 2.0) this.stuckCounter = 0; 
             const escapeAngle = Math.random() * Math.PI * 2;
-            const escapeX = this.x + Math.cos(escapeAngle) * 50;
-            const escapeY = this.y + Math.sin(escapeAngle) * 50;
-            this.moveAI(escapeX, escapeY, dt);
+            this.moveAI(this.x + Math.cos(escapeAngle)*50, this.y + Math.sin(escapeAngle)*50, dt);
             return;
         }
 
+        // Safe Zone Priority
         const distToCenter = Math.hypot(this.x - safeZone.currentX, this.y - safeZone.currentY);
-        const safeMargin = 100; 
-        if (distToCenter > safeZone.currentR - safeMargin) {
+        if (distToCenter > safeZone.currentR - 100) {
             this.moveAI(safeZone.currentX, safeZone.currentY, dt);
             this.findAndAttackEnemy(dt, true); 
             return;
@@ -415,15 +408,13 @@ class Entity {
             if (!onlyAttack) {
                 let desired = wData.range * 0.8;
                 if (this.weapon === 'GUN') desired = 250; 
-                
                 if (dist > desired) this.moveAI(target.x, target.y, dt);
-                else if (this.weapon === 'GUN' && dist < 100) {
+                else if (this.weapon === 'GUN' && dist < 100) { // Back away
                     const nx = this.x - Math.cos(this.angle) * CONSTANTS.PLAYER_SPEED_GROUND * dt;
                     const ny = this.y - Math.sin(this.angle) * CONSTANTS.PLAYER_SPEED_GROUND * dt;
                     if (!this.checkMapCollision(nx, ny)) { this.x = nx; this.y = ny; }
                 }
             }
-
             if (dist <= wData.range || (this.weapon === 'GUN' && dist < 600)) {
                 if (this.attackCooldown <= 0) this.attack();
             }
@@ -433,22 +424,13 @@ class Entity {
     moveAI(tx, ty, dt) {
         const angle = Math.atan2(ty - this.y, tx - this.x);
         const spd = CONSTANTS.PLAYER_SPEED_GROUND;
-        
-        let dx = Math.cos(angle) * spd * dt;
-        let dy = Math.sin(angle) * spd * dt;
-        
-        let nextX = this.x + dx;
-        let nextY = this.y + dy;
+        let nextX = this.x + Math.cos(angle) * spd * dt;
+        let nextY = this.y + Math.sin(angle) * spd * dt;
 
-        if (!this.checkMapCollision(nextX, nextY)) {
-            this.x = nextX; this.y = nextY;
-        } else {
-            if (!this.checkMapCollision(nextX, this.y)) {
-                this.x = nextX;
-            }
-            else if (!this.checkMapCollision(this.x, nextY)) {
-                this.y = nextY;
-            }
+        if (!this.checkMapCollision(nextX, nextY)) { this.x = nextX; this.y = nextY; }
+        else {
+            if (!this.checkMapCollision(nextX, this.y)) { this.x = nextX; }
+            else if (!this.checkMapCollision(this.x, nextY)) { this.y = nextY; }
         }
     }
 
@@ -461,12 +443,7 @@ class Entity {
 
     equipWeapon(type) {
         this.weapon = type;
-        if (type === 'GUN') {
-            this.ammo = 30;
-        } else {
-            this.ammo = 0;
-        }
-
+        if (type === 'GUN') this.ammo = 30; else this.ammo = 0;
         if (this.isPlayer) {
             let msg = `획득: ${WEAPONS[type].name}`;
             if (type === 'GUN') msg += " (30발)";
@@ -527,13 +504,11 @@ class Bullet {
     update(dt) {
         const nextX = this.x + this.vx * dt;
         const nextY = this.y + this.vy * dt;
-
         for (let obj of mapObjects) {
             if (obj.checkCollision(nextX, nextY, 2)) { 
                 this.life = 0; createParticles(nextX, nextY, '#888', 3); return; 
             }
         }
-        
         this.x = nextX; this.y = nextY; this.life -= dt;
     }
 }
@@ -543,11 +518,8 @@ class LootBox {
         this.x = x !== undefined ? x : Math.random() * (CONSTANTS.MAP_SIZE - 100) + 50;
         this.y = y !== undefined ? y : Math.random() * (CONSTANTS.MAP_SIZE - 100) + 50;
         this.active = true;
-        
         const r = Math.random();
-        if (r < 0.6) this.type = 'GUN';
-        else if (r < 0.8) this.type = 'SHIELD';
-        else this.type = 'KNIFE';
+        if (r < 0.6) this.type = 'GUN'; else if (r < 0.8) this.type = 'SHIELD'; else this.type = 'KNIFE';
     }
 }
 
@@ -568,9 +540,7 @@ function createCrater(x, y, r, ownerId) {
 }
 
 function spawnRandomLootBox() {
-    let box;
-    let attempts = 0;
-    let valid = false;
+    let box; let attempts = 0; let valid = false;
     while(!valid && attempts < 10) {
         let rx = Math.random() * (CONSTANTS.MAP_SIZE - 100) + 50;
         let ry = Math.random() * (CONSTANTS.MAP_SIZE - 100) + 50;
@@ -604,11 +574,13 @@ function getSafeSpawnPoint() {
     return {x: CONSTANTS.MAP_SIZE/2, y: CONSTANTS.MAP_SIZE/2}; 
 }
 
+/**
+ * Main Loop & Draw
+ */
 function initGame() {
     AudioSys.init(); AudioSys.startWind();
     entities = []; lootBoxes = []; bullets = []; particles = []; mapObjects = []; craters = [];
-    hasFirstLanded = false; 
-    lootSpawnTimer = CONSTANTS.LOOT_SPAWN_INTERVAL;
+    hasFirstLanded = false; lootSpawnTimer = CONSTANTS.LOOT_SPAWN_INTERVAL;
 
     for(let i=0; i<60; i++) mapObjects.push(new MapObject());
 
@@ -636,18 +608,11 @@ function startGroundPhase() {
     pt.innerText = "전투 시작!"; pt.classList.replace('text-yellow-400', 'text-red-500');
     AudioSys.stopWind();
 
-    safeZone.startX = CONSTANTS.MAP_SIZE / 2; 
-    safeZone.startY = CONSTANTS.MAP_SIZE / 2;
-    safeZone.currentX = safeZone.startX;
-    safeZone.currentY = safeZone.startY;
-    
+    safeZone.startX = CONSTANTS.MAP_SIZE / 2; safeZone.startY = CONSTANTS.MAP_SIZE / 2;
+    safeZone.currentX = safeZone.startX; safeZone.currentY = safeZone.startY;
     const endPos = getSafeSpawnPoint();
-    safeZone.endX = endPos.x;
-    safeZone.endY = endPos.y;
-
-    safeZone.startR = CONSTANTS.MAP_SIZE * 0.8;
-    safeZone.endR = 200; 
-    safeZone.currentR = safeZone.startR;
+    safeZone.endX = endPos.x; safeZone.endY = endPos.y;
+    safeZone.startR = CONSTANTS.MAP_SIZE * 0.8; safeZone.endR = 200; safeZone.currentR = safeZone.startR;
     
     addLog("자기장 생성! 안전 구역으로 이동하세요!");
 }
@@ -685,17 +650,14 @@ function update(dt) {
     updateLeaderboard();
 
     for (let i = bullets.length - 1; i >= 0; i--) {
-        const b = bullets[i];
-        b.update(dt);
-        let hit = false;
+        const b = bullets[i]; b.update(dt); let hit = false;
         entities.forEach(e => {
             if (e.id !== b.ownerId && e.alive) {
                 const dist = Math.hypot(b.x - e.x, b.y - e.y);
                 const hitRadius = e.z > 0 ? e.radius + 10 : e.radius; 
                 if (dist < hitRadius) {
                     e.takeDamage(b.damage, entities.find(ent => ent.id === b.ownerId));
-                    createParticles(e.x, e.y, '#ff0000', 3);
-                    hit = true;
+                    createParticles(e.x, e.y, '#ff0000', 3); hit = true;
                 }
             }
         });
@@ -717,41 +679,6 @@ function update(dt) {
     document.getElementById('kill-counter').innerText = `킬: ${player.kills}`;
 }
 
-function updateLeaderboard() {
-    const container = document.getElementById('leaderboard-content');
-    const sorted = [...entities].sort((a, b) => {
-        if (a.alive && !b.alive) return -1; if (!a.alive && b.alive) return 1; return b.kills - a.kills;
-    });
-    let html = '';
-    sorted.forEach((e, idx) => {
-        const color = e.alive ? (e.isPlayer ? "text-yellow-300 font-bold" : "text-gray-100") : "text-gray-500 line-through";
-        html += `<div class="leaderboard-row ${color}"><span>${idx+1}. ${e.isPlayer?"나":"BOT "+e.id}</span><span>${e.kills}</span></div>`;
-    });
-    container.innerHTML = html;
-}
-
-function checkWinCondition() {
-    const aliveCount = entities.filter(e => e.alive).length;
-    if (!player.alive) endGame(false);
-    else if (aliveCount === 1) endGame(true, true);
-}
-
-function endGame(win, allDead = false) {
-    gameState = 'END'; AudioSys.stopWind();
-    const p = document.getElementById('center-panel');
-    const t = p.querySelector('h1'); const d = p.querySelector('p');
-    p.style.display = 'flex'; document.getElementById('start-btn').innerText = "다시 하기";
-    
-    if (!player.alive) {
-        t.innerText = "GAME OVER"; t.className = "text-5xl font-bold text-red-600 mb-4";
-        d.innerText = `사망했습니다.\n처치 수: ${player.kills}`;
-    } else {
-        t.innerText = allDead ? "WINNER WINNER!" : "TIME OVER";
-        t.className = allDead ? "text-5xl font-bold text-yellow-400 mb-4" : "text-5xl font-bold text-blue-400 mb-4";
-        d.innerText = allDead ? `최후의 1인! 처치: ${player.kills}` : `생존 성공! 처치: ${player.kills}`;
-    }
-}
-
 function draw() {
     CTX.fillStyle = '#D4A373'; CTX.fillRect(0, 0, CANVAS.width, CANVAS.height);
     CTX.save();
@@ -759,25 +686,19 @@ function draw() {
 
     CTX.strokeStyle = '#8D6E63'; CTX.lineWidth = 10; CTX.strokeRect(0, 0, CONSTANTS.MAP_SIZE, CONSTANTS.MAP_SIZE);
     
+    // Draw Safe Zone
     if (gameState === 'GROUND' && safeZone.currentR > 0) {
-        CTX.save();
-        CTX.beginPath();
+        CTX.save(); CTX.beginPath();
         CTX.rect(-1000, -1000, CONSTANTS.MAP_SIZE + 2000, CONSTANTS.MAP_SIZE + 2000);
         CTX.arc(safeZone.currentX, safeZone.currentY, safeZone.currentR, 0, Math.PI*2, true);
-        CTX.fillStyle = 'rgba(0, 100, 255, 0.2)'; 
-        CTX.fill();
-        
-        CTX.beginPath();
-        CTX.arc(safeZone.currentX, safeZone.currentY, safeZone.currentR, 0, Math.PI*2);
-        CTX.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-        CTX.lineWidth = 5;
-        CTX.stroke();
+        CTX.fillStyle = 'rgba(0, 100, 255, 0.2)'; CTX.fill();
+        CTX.beginPath(); CTX.arc(safeZone.currentX, safeZone.currentY, safeZone.currentR, 0, Math.PI*2);
+        CTX.strokeStyle = 'rgba(255, 255, 255, 0.8)'; CTX.lineWidth = 5; CTX.stroke();
         CTX.restore();
     }
 
     craters.forEach(c => {
-        CTX.fillStyle = `rgba(0,0,0,${c.alpha * 0.4})`;
-        CTX.beginPath(); CTX.arc(c.x, c.y, c.r, 0, Math.PI*2); CTX.fill();
+        CTX.fillStyle = `rgba(0,0,0,${c.alpha * 0.4})`; CTX.beginPath(); CTX.arc(c.x, c.y, c.r, 0, Math.PI*2); CTX.fill();
     });
 
     mapObjects.forEach(obj => obj.draw(CTX));
@@ -788,7 +709,7 @@ function draw() {
             CTX.save(); CTX.translate(box.x, box.y);
             CTX.fillStyle = '#FFD700'; CTX.fillRect(-15, -15, 30, 30);
             CTX.fillStyle = '#000'; CTX.font = '20px Arial'; CTX.textAlign='center'; CTX.textBaseline='middle';
-            let icon = box.type==='GUN'?'🔫':(box.type==='SHIELD'?'🛡️':'🔪'); CTX.fillText(icon, 0, 0);
+            CTX.fillText('?', 0, 0); // [수정] 물음표 표시
             CTX.restore();
         });
     }
@@ -834,15 +755,9 @@ function drawMinimap(ctx) {
     ctx.strokeStyle='rgba(255,255,255,0.8)'; ctx.lineWidth=2; ctx.strokeRect(0,0,s,s);
     
     if (gameState === 'GROUND') {
-        const sx = safeZone.currentX * sc;
-        const sy = safeZone.currentY * sc;
-        const sr = safeZone.currentR * sc;
-        ctx.beginPath();
-        ctx.arc(sx, sy, sr, 0, Math.PI*2);
-        ctx.strokeStyle = '#00f';
-        ctx.stroke();
+        const sx = safeZone.currentX * sc; const sy = safeZone.currentY * sc; const sr = safeZone.currentR * sc;
+        ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI*2); ctx.strokeStyle = '#00f'; ctx.stroke();
     }
-
     if(player && player.alive) {
         const px=player.x*sc, py=player.y*sc;
         ctx.fillStyle='#00BFFF'; ctx.beginPath(); ctx.arc(px,py,3,0,Math.PI*2); ctx.fill();
@@ -852,12 +767,46 @@ function drawMinimap(ctx) {
     ctx.restore();
 }
 
+function updateLeaderboard() {
+    const container = document.getElementById('leaderboard-content');
+    const sorted = [...entities].sort((a, b) => {
+        if (a.alive && !b.alive) return -1; if (!a.alive && b.alive) return 1; return b.kills - a.kills;
+    });
+    let html = '';
+    sorted.forEach((e, idx) => {
+        const color = e.alive ? (e.isPlayer ? "text-yellow-300 font-bold" : "text-gray-100") : "text-gray-500 line-through";
+        html += `<div class="leaderboard-row ${color}"><span>${idx+1}. ${e.isPlayer?"나":"BOT "+e.id}</span><span>${e.kills}</span></div>`;
+    });
+    container.innerHTML = html;
+}
+
+function checkWinCondition() {
+    const aliveCount = entities.filter(e => e.alive).length;
+    if (!player.alive) endGame(false);
+    else if (aliveCount === 1) endGame(true, true);
+}
+
+function endGame(win, allDead = false) {
+    gameState = 'END'; AudioSys.stopWind();
+    const p = document.getElementById('center-panel');
+    const t = p.querySelector('h1'); const d = p.querySelector('p');
+    p.style.display = 'flex'; document.getElementById('start-btn').innerText = "다시 하기";
+    
+    if (!player.alive) {
+        t.innerText = "GAME OVER"; t.className = "text-5xl font-bold text-red-600 mb-4";
+        d.innerText = `사망했습니다.\n처치 수: ${player.kills}`;
+    } else {
+        t.innerText = allDead ? "WINNER WINNER!" : "TIME OVER";
+        t.className = allDead ? "text-5xl font-bold text-yellow-400 mb-4" : "text-5xl font-bold text-blue-400 mb-4";
+        d.innerText = allDead ? `최후의 1인! 처치: ${player.kills}` : `생존 성공! 처치: ${player.kills}`;
+    }
+}
+
 function updateHPBar() { 
     if(player) { 
         const b=document.getElementById('hp-bar'); 
         const pct = (player.hp / player.maxHp) * 100;
-        b.style.width=`${pct}%`; 
-        b.className=pct<30?"bar-fill bg-red-600 animate-pulse":"bar-fill bg-green-500"; 
+        b.style.width=`${pct}%`; b.className=pct<30?"bar-fill bg-red-600 animate-pulse":"bar-fill bg-green-500"; 
     } 
 }
 function updateStaminaBar(v, f) { const b=document.getElementById('st-bar'); b.style.width=`${v}%`; b.className=f?"bar-fill bg-gray-400":"bar-fill bg-yellow-400"; }
@@ -866,11 +815,8 @@ function addLog(m) { console.log(m); }
 
 function gameLoop() {
     if (gameState === 'MENU') return;
-    const now = performance.now();
-    const dt = (now - lastTime) / 1000;
-    lastTime = now;
-    update(dt);
-    draw();
+    const now = performance.now(); const dt = (now - lastTime) / 1000; lastTime = now;
+    update(dt); draw();
     if (gameState !== 'END') requestAnimationFrame(gameLoop);
 }
 
@@ -879,7 +825,6 @@ window.addEventListener('keydown', e=>{if(e.code==='KeyW'||e.key==='ArrowUp')key
 window.addEventListener('keyup', e=>{if(e.code==='KeyW'||e.key==='ArrowUp')keys.w=false; if(e.code==='KeyA'||e.key==='ArrowLeft')keys.a=false; if(e.code==='KeyS'||e.key==='ArrowDown')keys.s=false; if(e.code==='KeyD'||e.key==='ArrowRight')keys.d=false; if(e.code==='Space')keys.space=false; if(e.code.includes('Shift'))keys.shift=false;});
 window.addEventListener('mousemove', e=>{mousePos.x=e.clientX; mousePos.y=e.clientY;});
 window.addEventListener('mousedown', ()=>keys.mouse=true); window.addEventListener('mouseup', ()=>keys.mouse=false);
-// [수정] 버튼 클릭 시 shift 키 상태 변경
 const db=document.getElementById('dive-btn'); 
 if(db){
     db.addEventListener('mousedown', ()=>keys.shift=true); 
