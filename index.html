@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mini Battlegrounds: Final Build</title>
+    <title>펍지키우기포지마스터</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { margin: 0; overflow: hidden; background-color: #1a202c; color: white; user-select: none; }
@@ -40,6 +40,7 @@
             <div class="hud-text text-right">
                 <div id="altitude-display">고도: 1000pt</div>
                 <div id="weapon-display" class="text-blue-300">무기: 없음</div>
+                <div id="loot-count-display" class="text-green-400 font-bold">파밍: 0 / 7</div>
             </div>
             <div id="leaderboard" class="bg-glass p-3 rounded w-48 text-gray-200 shadow-lg pointer-events-auto">
                 <div class="text-xs font-bold text-gray-400 border-b border-gray-600 mb-1 pb-1 flex justify-between">
@@ -54,14 +55,14 @@
     <!-- Center Panel -->
     <div id="center-panel" class="absolute inset-0 flex items-center justify-center pointer-events-auto bg-black/70 z-50">
         <div class="text-center">
-            <h1 class="text-5xl font-bold text-yellow-500 mb-4 drop-shadow-lg">WASTELAND WARFARE</h1>
+            <h1 class="text-5xl font-bold text-green-500 mb-4 drop-shadow-lg">펍지키우기포지마스터</h1>
             <p class="text-gray-300 mb-6 max-w-md mx-auto">
-                1. <b>통합 조작</b>: 강하/달리기 모두 <b>SHIFT</b> 키를 사용하세요.<br>
-                2. <b>미스터리 박스</b>: 상자를 열기 전엔 내용물을 알 수 없습니다.<br>
-                3. <b>생존</b>: 자기장과 적들로부터 살아남으세요.
+                1. <b>통합 조작</b>: 강하/달리기 모두 <b>SHIFT</b> 키 사용.<br>
+                2. <b>플레이어 전용 승리</b>: 상자 <b>7개</b> 이상 획득 시 <b>초록색 웜홀</b>로 탈출 가능!<br>
+                3. <b>생존</b>: 자기장이 매우 아픕니다(초당 90). 주의하세요!
             </p>
             <button id="start-btn" class="px-8 py-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold rounded text-xl shadow-lg transform transition hover:scale-105">
-                전투 시작
+                게임 시작
             </button>
         </div>
     </div>
@@ -150,7 +151,10 @@ const CONSTANTS = {
     PLAYER_SPEED_AIR: 300, PLAYER_SPEED_GROUND: 200, PLAYER_RADIUS: 15,
     CRATER_RADIUS: 60,
     LOOT_SPAWN_INTERVAL: 5,
-    BLUEZONE_DAMAGE: 5 
+    BLUEZONE_DAMAGE: 90, // [수정] 자기장 데미지 상향
+    WIN_LOOT_COUNT: 7,
+    PORTAL_SPAWN_TIME: 20, 
+    PORTAL_DURATION: 10
 };
 
 const WEAPONS = {
@@ -165,6 +169,15 @@ let gameState = 'MENU';
 let gameTime = 0, lastTime = 0;
 let hasFirstLanded = false;
 let lootSpawnTimer = 0;
+
+// Portal State
+let portal = {
+    active: false,
+    x: 0, y: 0,
+    timer: 0,
+    spawnTimer: CONSTANTS.PORTAL_SPAWN_TIME,
+    radius: 50
+};
 
 let safeZone = {
     startX: 0, startY: 0, endX: 0, endY: 0,
@@ -225,6 +238,7 @@ class Entity {
         this.stamina = 100; this.fatigued = false; this.alive = true;
         this.weapon = 'NONE'; this.kills = 0;
         this.ammo = 0;
+        this.lootCount = 0; 
         this.isDiving = false; this.dropSpeed = CONSTANTS.START_ALTITUDE / CONSTANTS.DROP_TIME_NORMAL;
         this.actionTimer = 0; this.attackCooldown = 0;
         this.lastX = 0; this.lastY = 0; this.stuckCounter = 0; 
@@ -238,7 +252,7 @@ class Entity {
     updateDrop(dt) {
         let rate = this.dropSpeed;
         if (this.isPlayer) {
-            this.isDiving = keys.shift; // Unified Control
+            this.isDiving = keys.shift; 
             AudioSys.updateWind(this.isDiving ? 1.0 : 0.0);
         } else {
             if (this.actionTimer <= 0) {
@@ -272,7 +286,6 @@ class Entity {
             createCrater(this.x, this.y, CONSTANTS.CRATER_RADIUS, this.id);
         }
         
-        // Air Body Check
         entities.forEach(other => {
             if (other === this || !other.alive || other.z <= 0) return;
             if (Math.abs(this.z - other.z) > 100) return;
@@ -292,7 +305,6 @@ class Entity {
     updateGround(dt) {
         if (this.attackCooldown > 0) this.attackCooldown -= dt;
         
-        // Blue Zone
         if (gameState === 'GROUND') {
             const distToCenter = Math.hypot(this.x - safeZone.currentX, this.y - safeZone.currentY);
             if (distToCenter > safeZone.currentR) {
@@ -312,7 +324,6 @@ class Entity {
             if (this.fatigued) {
                 this.stamina += 33.3 * dt; if (this.stamina >= 100) { this.stamina = 100; this.fatigued = false; }
             } else {
-                // Unified Control: Shift for Sprint
                 if (keys.shift && isMoving && this.stamina > 0) {
                     spd *= 1.5; this.stamina -= 40 * dt; if (this.stamina <= 0) { this.stamina = 0; this.fatigued = true; }
                 } else if (this.stamina < 100) {
@@ -339,6 +350,11 @@ class Entity {
             let wName = WEAPONS[this.weapon].name;
             if (this.weapon === 'GUN') wName += ` (${this.ammo})`;
             document.getElementById('weapon-display').innerText = `무기: ${wName}`;
+            
+            document.getElementById('loot-count-display').innerText = `파밍: ${this.lootCount} / ${CONSTANTS.WIN_LOOT_COUNT}`;
+            if(this.lootCount >= CONSTANTS.WIN_LOOT_COUNT) {
+                document.getElementById('loot-count-display').classList.add('animate-pulse');
+            }
 
         } else {
             this.updateAI(dt);
@@ -358,7 +374,6 @@ class Entity {
     updateAI(dt) {
         if (this.actionTimer > 0) this.actionTimer -= dt;
         
-        // Anti-Stuck Logic
         const movedDist = Math.hypot(this.x - this.lastX, this.y - this.lastY);
         if (movedDist < 1.0) this.stuckCounter += dt;
         else this.stuckCounter = 0;
@@ -367,11 +382,13 @@ class Entity {
         if (this.stuckCounter > 0.5) {
             if (this.stuckCounter > 2.0) this.stuckCounter = 0; 
             const escapeAngle = Math.random() * Math.PI * 2;
-            this.moveAI(this.x + Math.cos(escapeAngle)*50, this.y + Math.sin(escapeAngle)*50, dt);
+            const escapeX = this.x + Math.cos(escapeAngle) * 50;
+            const escapeY = this.y + Math.sin(escapeAngle) * 50;
+            // Force move attempt
+            this.x = escapeX; this.y = escapeY;
             return;
         }
 
-        // Safe Zone Priority
         const distToCenter = Math.hypot(this.x - safeZone.currentX, this.y - safeZone.currentY);
         if (distToCenter > safeZone.currentR - 100) {
             this.moveAI(safeZone.currentX, safeZone.currentY, dt);
@@ -409,7 +426,8 @@ class Entity {
                 let desired = wData.range * 0.8;
                 if (this.weapon === 'GUN') desired = 250; 
                 if (dist > desired) this.moveAI(target.x, target.y, dt);
-                else if (this.weapon === 'GUN' && dist < 100) { // Back away
+                else if (this.weapon === 'GUN' && dist < 100) { 
+                    // Simple retreat
                     const nx = this.x - Math.cos(this.angle) * CONSTANTS.PLAYER_SPEED_GROUND * dt;
                     const ny = this.y - Math.sin(this.angle) * CONSTANTS.PLAYER_SPEED_GROUND * dt;
                     if (!this.checkMapCollision(nx, ny)) { this.x = nx; this.y = ny; }
@@ -421,17 +439,39 @@ class Entity {
         }
     }
 
+    // [수정] Improved AI Movement with Obstacle Avoidance
     moveAI(tx, ty, dt) {
-        const angle = Math.atan2(ty - this.y, tx - this.x);
         const spd = CONSTANTS.PLAYER_SPEED_GROUND;
-        let nextX = this.x + Math.cos(angle) * spd * dt;
-        let nextY = this.y + Math.sin(angle) * spd * dt;
+        let angle = Math.atan2(ty - this.y, tx - this.x);
+        
+        // Check angles: 0, +30, -30, +60, -60, +90, -90 degrees
+        const checkAngles = [0, 0.5, -0.5, 1.0, -1.0, 1.5, -1.5];
+        let moved = false;
 
-        if (!this.checkMapCollision(nextX, nextY)) { this.x = nextX; this.y = nextY; }
-        else {
-            if (!this.checkMapCollision(nextX, this.y)) { this.x = nextX; }
-            else if (!this.checkMapCollision(this.x, nextY)) { this.y = nextY; }
+        for (let offset of checkAngles) {
+            let testAngle = angle + offset;
+            let dx = Math.cos(testAngle) * spd * dt;
+            let dy = Math.sin(testAngle) * spd * dt;
+            let nextX = this.x + dx;
+            let nextY = this.y + dy;
+
+            // Check collision with slightly larger radius for safety
+            let collided = false;
+            for (let obj of mapObjects) {
+                if (obj.checkCollision(nextX, nextY, this.radius + 5)) {
+                    collided = true; break;
+                }
+            }
+
+            if (!collided) {
+                this.x = nextX;
+                this.y = nextY;
+                moved = true;
+                break; // Found a path
+            }
         }
+        
+        // If still stuck, increment counter in updateAI
     }
 
     checkMapCollision(x, y) {
@@ -442,6 +482,12 @@ class Entity {
     }
 
     equipWeapon(type) {
+        this.lootCount++; 
+        if (this.isPlayer && this.lootCount === CONSTANTS.WIN_LOOT_COUNT) {
+            addLog("각성! 초록색 웜홀을 찾아 탈출하세요!");
+            AudioSys.playTone(400, 'triangle', 0.5);
+        }
+
         this.weapon = type;
         if (type === 'GUN') this.ammo = 30; else this.ammo = 0;
         if (this.isPlayer) {
@@ -581,6 +627,9 @@ function initGame() {
     AudioSys.init(); AudioSys.startWind();
     entities = []; lootBoxes = []; bullets = []; particles = []; mapObjects = []; craters = [];
     hasFirstLanded = false; lootSpawnTimer = CONSTANTS.LOOT_SPAWN_INTERVAL;
+    
+    // Portal Reset
+    portal = { active: false, x: 0, y: 0, timer: 0, spawnTimer: CONSTANTS.PORTAL_SPAWN_TIME, radius: 60 };
 
     for(let i=0; i<60; i++) mapObjects.push(new MapObject());
 
@@ -625,6 +674,34 @@ function update(dt) {
         if (lootSpawnTimer <= 0) {
             spawnRandomLootBox();
             lootSpawnTimer = CONSTANTS.LOOT_SPAWN_INTERVAL;
+        }
+        
+        if (!portal.active) {
+            portal.spawnTimer -= dt;
+            if (portal.spawnTimer <= 0) {
+                const pPos = getSafeSpawnPoint();
+                portal.x = pPos.x; portal.y = pPos.y;
+                portal.active = true;
+                portal.timer = CONSTANTS.PORTAL_DURATION;
+                portal.spawnTimer = CONSTANTS.PORTAL_SPAWN_TIME + Math.random() * 20;
+                addLog("초록색 웜홀 포탈이 생성되었습니다!");
+            }
+        } else {
+            portal.timer -= dt;
+            if (portal.timer <= 0) {
+                portal.active = false;
+                addLog("웜홀 포탈이 사라졌습니다.");
+            }
+            
+            // Check Collision with Portal (Player Only)
+            entities.forEach(e => {
+                if (e.isPlayer && e.alive && e.lootCount >= CONSTANTS.WIN_LOOT_COUNT) {
+                    const d = Math.hypot(e.x - portal.x, e.y - portal.y);
+                    if (d < portal.radius) {
+                        endGame(true, false, e);
+                    }
+                }
+            });
         }
     }
 
@@ -697,6 +774,22 @@ function draw() {
         CTX.restore();
     }
 
+    // Draw Portal
+    if (portal.active) {
+        CTX.save();
+        CTX.translate(portal.x, portal.y);
+        CTX.rotate(Date.now() / 500); // Spin effect
+        CTX.beginPath();
+        CTX.arc(0, 0, portal.radius, 0, Math.PI*2);
+        CTX.fillStyle = 'rgba(0, 255, 0, 0.3)';
+        CTX.fill();
+        CTX.strokeStyle = '#0f0';
+        CTX.lineWidth = 5;
+        CTX.setLineDash([10, 5]);
+        CTX.stroke();
+        CTX.restore();
+    }
+
     craters.forEach(c => {
         CTX.fillStyle = `rgba(0,0,0,${c.alpha * 0.4})`; CTX.beginPath(); CTX.arc(c.x, c.y, c.r, 0, Math.PI*2); CTX.fill();
     });
@@ -709,7 +802,7 @@ function draw() {
             CTX.save(); CTX.translate(box.x, box.y);
             CTX.fillStyle = '#FFD700'; CTX.fillRect(-15, -15, 30, 30);
             CTX.fillStyle = '#000'; CTX.font = '20px Arial'; CTX.textAlign='center'; CTX.textBaseline='middle';
-            CTX.fillText('?', 0, 0); // [수정] 물음표 표시
+            CTX.fillText('?', 0, 0);
             CTX.restore();
         });
     }
@@ -724,7 +817,18 @@ function draw() {
 
         CTX.save(); CTX.translate(e.x, e.y);
         let sc = 1 + (e.z / 800); CTX.scale(sc, sc); CTX.rotate(e.angle);
+        
+        // Glow if enough loot (Only Player visual)
+        if (e.isPlayer && e.lootCount >= CONSTANTS.WIN_LOOT_COUNT) {
+            CTX.shadowBlur = 20;
+            CTX.shadowColor = '#0f0';
+        } else {
+            CTX.shadowBlur = 0;
+        }
+
         CTX.fillStyle = e.color; CTX.beginPath(); CTX.arc(0, 0, e.radius, 0, Math.PI*2); CTX.fill();
+        CTX.shadowBlur = 0; // Reset
+
         CTX.fillStyle = '#fff';
         if (e.weapon === 'GUN') CTX.fillRect(10, -5, 20, 10);
         else if (e.weapon === 'KNIFE') { CTX.beginPath(); CTX.moveTo(10,0); CTX.lineTo(30,0); CTX.lineWidth=4; CTX.strokeStyle='#CFD8DC'; CTX.stroke(); }
@@ -758,6 +862,12 @@ function drawMinimap(ctx) {
         const sx = safeZone.currentX * sc; const sy = safeZone.currentY * sc; const sr = safeZone.currentR * sc;
         ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI*2); ctx.strokeStyle = '#00f'; ctx.stroke();
     }
+    
+    if (portal.active) {
+        ctx.fillStyle = '#0f0';
+        ctx.beginPath(); ctx.arc(portal.x * sc, portal.y * sc, 4, 0, Math.PI*2); ctx.fill();
+    }
+
     if(player && player.alive) {
         const px=player.x*sc, py=player.y*sc;
         ctx.fillStyle='#00BFFF'; ctx.beginPath(); ctx.arc(px,py,3,0,Math.PI*2); ctx.fill();
@@ -786,13 +896,18 @@ function checkWinCondition() {
     else if (aliveCount === 1) endGame(true, true);
 }
 
-function endGame(win, allDead = false) {
+function endGame(win, allDead = false, winnerEntity = null) {
     gameState = 'END'; AudioSys.stopWind();
     const p = document.getElementById('center-panel');
     const t = p.querySelector('h1'); const d = p.querySelector('p');
     p.style.display = 'flex'; document.getElementById('start-btn').innerText = "다시 하기";
     
-    if (!player.alive) {
+    if (winnerEntity) {
+        const winnerName = winnerEntity.isPlayer ? "당신" : `BOT ${winnerEntity.id}`;
+        t.innerText = "PORTAL ESCAPE!";
+        t.className = "text-5xl font-bold text-green-400 mb-4";
+        d.innerText = `${winnerName}이(가) 웜홀을 통해 탈출했습니다!\n완벽한 승리!`;
+    } else if (!player.alive) {
         t.innerText = "GAME OVER"; t.className = "text-5xl font-bold text-red-600 mb-4";
         d.innerText = `사망했습니다.\n처치 수: ${player.kills}`;
     } else {
@@ -806,7 +921,8 @@ function updateHPBar() {
     if(player) { 
         const b=document.getElementById('hp-bar'); 
         const pct = (player.hp / player.maxHp) * 100;
-        b.style.width=`${pct}%`; b.className=pct<30?"bar-fill bg-red-600 animate-pulse":"bar-fill bg-green-500"; 
+        b.style.width=`${pct}%`; 
+        b.className=pct<30?"bar-fill bg-red-600 animate-pulse":"bar-fill bg-green-500"; 
     } 
 }
 function updateStaminaBar(v, f) { const b=document.getElementById('st-bar'); b.style.width=`${v}%`; b.className=f?"bar-fill bg-gray-400":"bar-fill bg-yellow-400"; }
