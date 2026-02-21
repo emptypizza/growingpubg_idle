@@ -35,6 +35,7 @@ public class LootBox : MonoBehaviour
         if (entity != null && entity.alive)
         {
             entity.EquipWeapon(weaponType);
+            UIManager.Instance?.AddLog($"Acquired {WeaponData.Get(weaponType).displayName}!");
             isActive = false;
             ParticleSpawner.Spawn(transform.position, new Color(1f, 0.84f, 0f), 10); // 금색
             Destroy(gameObject);

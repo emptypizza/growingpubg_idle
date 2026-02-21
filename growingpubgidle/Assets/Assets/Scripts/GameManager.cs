@@ -20,6 +20,12 @@ public class GameManager : MonoBehaviour
     public GameState currentState = GameState.Menu;
     public float gameTime;
 
+    /// <summary> True when gameplay input should be accepted (Dropping or Ground). </summary>
+    public bool IsPlayable()
+    {
+        return currentState == GameState.Dropping || currentState == GameState.Ground;
+    }
+
     // 엔티티 관리
     private List<EntityBase> allEntities = new List<EntityBase>();
     private List<LootBox> lootBoxes = new List<LootBox>();
@@ -51,7 +57,7 @@ public class GameManager : MonoBehaviour
 
     private void Update()
     {
-        if (currentState == GameState.Menu || currentState == GameState.End) return;
+        if (!IsPlayable()) return;
 
         float dt = Time.deltaTime;
 
@@ -137,6 +143,7 @@ public class GameManager : MonoBehaviour
 
         currentState = GameState.Dropping;
         gameTime = GameConfig.DROP_TIME_NORMAL;
+        Time.timeScale = 1f; // ensure not paused
 
         UIManager.Instance?.OnGameStart();
     }

@@ -100,7 +100,7 @@ public struct WeaponData
                     range = 50f,
                     damage = 15f,
                     delay = 0.15f,
-                    bulletSpeed = 120f
+                    bulletSpeed = 80f
                 };
             case WeaponType.Shield:
                 return new WeaponData

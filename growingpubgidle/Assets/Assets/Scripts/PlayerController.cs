@@ -34,8 +34,13 @@ public class PlayerController : MonoBehaviour
 
     private void Update()
     {
-        if (!entity.alive || GameManager.Instance.currentState == GameState.Menu
-            || GameManager.Instance.currentState == GameState.End) return;
+        // 💡 1. 게임 상태 예외 처리 개선 (GameManager.IsPlayable 활용)
+        if (!entity.alive || !GameManager.Instance.IsPlayable())
+        {
+            // 입력이 막히거나 조작할 수 없는 상태(Menu, Pause 등)일 때는 관성 제거
+            rb.linearVelocity = Vector2.zero; 
+            return;
+        }
 
         GatherInput();
 
@@ -53,10 +58,10 @@ public class PlayerController : MonoBehaviour
     {
         // ── 키보드 입력 (에디터/PC) ──
         float kx = 0f, ky = 0f;
-        if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow)) ky += 2f;
-        if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow)) ky -= 2f    ;
-        if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) kx -= 2f;
-        if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) kx += 2f;
+        if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow)) ky += 1f;
+        if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow)) ky -= 1f;
+        if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) kx -= 1f;
+        if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) kx += 1f;
 
         moveInput = new Vector2(kx, ky);
 
@@ -73,7 +78,19 @@ public class PlayerController : MonoBehaviour
         if (mobileInput != null) isSprinting |= mobileInput.IsSprinting;
 
         // 공격
-        isAttacking = Input.GetMouseButton(0);
+        isAttacking = false;
+        if (Input.touchCount == 0) 
+        {
+            // 마우스 환경 (에디터/PC): UI 클릭이 아닐 때만 발사 인정
+            bool pointerOverUI = UnityEngine.EventSystems.EventSystem.current != null && 
+                                 UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject();
+            if (Input.GetMouseButton(0) && !pointerOverUI)
+            {
+                isAttacking = true;
+            }
+        }
+
+        // 모바일 발사 버튼 오버라이드
         if (mobileInput != null) isAttacking |= mobileInput.IsAttacking;
 
         // 조준 방향 (마우스 또는 터치)
@@ -81,7 +98,7 @@ public class PlayerController : MonoBehaviour
         {
             if (mobileInput != null && mobileInput.HasAimInput)
             {
-                aimWorldPos = (Vector2)transform.position + mobileInput.AimDirection * 20f;
+                aimWorldPos = (Vector2)transform.position + mobileInput.AimDirection * 1f;
             }
             else
             {
@@ -108,15 +125,21 @@ public class PlayerController : MonoBehaviour
 
         entity.altitude -= rate * dt;
 
-        // 공중 이동
+        // 💡 2. 공중 이동 (velocity로 델타타임 물리 충돌 해결)
         if (moveInput.sqrMagnitude > 0.01f)
         {
-            Vector2 airMove = moveInput * GameConfig.PLAYER_SPEED_AIR * dt;
-            rb.MovePosition(rb.position + airMove);
+            rb.linearVelocity = moveInput * GameConfig.PLAYER_SPEED_AIR;
+        }
+        else
+        {
+            rb.linearVelocity = Vector2.zero;
         }
 
-        // 맵 경계 클램프
-        ClampToMap();
+        // 💡 3. 맵 경계 클램프 (물리 처리와 겹치지 않게 transform 직접 조작)
+        Vector2 clampedPos = transform.position;
+        clampedPos.x = Mathf.Clamp(clampedPos.x, 0f, GameConfig.MAP_SIZE);
+        clampedPos.y = Mathf.Clamp(clampedPos.y, 0f, GameConfig.MAP_SIZE);
+        transform.position = clampedPos;
 
         // 착지
         if (entity.altitude <= 0f)
@@ -170,14 +193,21 @@ public class PlayerController : MonoBehaviour
 
         UIManager.Instance?.UpdateStaminaBar(entity.stamina, entity.fatigued);
 
-        // ── 이동 (Rigidbody2D) ──
+        // 💡 4. 지상 이동 (velocity로 즉각적이고 안정적인 반응 구현)
         if (isMoving)
         {
-            Vector2 targetPos = rb.position + moveInput * speed * dt;
-            rb.MovePosition(targetPos);
+            rb.linearVelocity = moveInput * speed;
+        }
+        else
+        {
+            rb.linearVelocity = Vector2.zero; // 조이스틱에서 손을 떼면 즉시 정지
         }
 
-        ClampToMap();
+        // 💡 5. 맵 경계 클램프
+        Vector2 clampedPos = transform.position;
+        clampedPos.x = Mathf.Clamp(clampedPos.x, 0f, GameConfig.MAP_SIZE);
+        clampedPos.y = Mathf.Clamp(clampedPos.y, 0f, GameConfig.MAP_SIZE);
+        transform.position = clampedPos;
 
         // ── 조준 ──
         Vector2 dir = aimWorldPos - (Vector2)transform.position;
@@ -194,18 +224,10 @@ public class PlayerController : MonoBehaviour
         }
 
         // ── 자기장 내부 여부에 따른 화면 효과 ──
-        if (GameManager.Instance.currentState == GameState.Ground && GameManager.Instance.blueZone != null)
+        if (GameManager.Instance.blueZone != null)
         {
             bool inZone = GameManager.Instance.blueZone.IsInsideSafeZone(transform.position);
             UIManager.Instance?.SetDamageOverlay(!inZone);
         }
-    }
-
-    private void ClampToMap()
-    {
-        Vector2 pos = rb.position;
-        pos.x = Mathf.Clamp(pos.x, 0f, GameConfig.MAP_SIZE);
-        pos.y = Mathf.Clamp(pos.y, 0f, GameConfig.MAP_SIZE);
-        rb.position = pos;
     }
 }

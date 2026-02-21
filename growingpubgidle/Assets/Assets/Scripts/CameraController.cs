@@ -8,7 +8,7 @@ public class CameraController : MonoBehaviour
 {
     [Header("Settings")]
     [SerializeField] private float smoothSpeed = 8f;
-    [SerializeField] private float baseCameraSize = 15f;
+    [SerializeField] private float baseCameraSize = 6f;
     [SerializeField] private float maxZoomOut = 50f;
     [SerializeField] private float zoomDivisor = 30f; // altitude / zoomDivisor → 추가 줌아웃
 
